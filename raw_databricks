@@ -1,0 +1,40 @@
+#Bibliotecas
+from pyspark.sql.functions import expr, current_timestamp
+
+# ------------------------------------------------------------------------------------------------------------
+
+# Configurações do Azure Data Lake Storage Generation 2
+storage_account_name = "colocar_nome_do_storage_account"
+storage_account_key = "colocar_a_chave_do_storage_account"
+container_name = "colocar_o_nome_do_conteiner"              
+
+spark.conf.set(f"fs.azure.account.key.{storage_account_name}.dfs.core.windows.net", storage_account_key)
+
+# Testar a conexão do Azure Data Lake Storage Generation 2
+display(dbutils.fs.ls(f"abfss://{container_name}@{storage_account_name}.dfs.core.windows.net/sqlserver/FCSCDC/dbo/CCOMI/2024/10/22"))
+
+
+# ------------------------------------- EXTRAINDO OS DADOS -------------------------------------------------------
+
+# Define em qual catálogo de dados as tabelas serão salvas
+catalog_name = "colocar_nome_do_catalogo_do_databricks"
+database_name = "nome_do_banco_de_dados"
+table_name = "nome_da_tabela"
+local_path = f"abfss://{container_name}@{storage_account_name}.dfs.core.windows.net/sqlserver/FCSCDC/dbo/CCOMI/2024/10/22"
+
+df = spark.read.parquet(f"{local_path}/{table_name}.parquet")
+
+
+# ------------------------------------- TRATAR OS DADOS -------------------------------------------------------
+
+df = df.select([expr(f"CAST({col} AS STRING)").alias(col) for col in df.columns])
+
+df = df.withColumn("partition_time", current_timestamp())
+
+
+
+
+# ----------------------------------- SALVA EM UM DELTA TABLE (opcional) ----------------------------------------
+df.write.format("delta").mode("append").partitionBy("partition_time").saveAsTable(f"{catalog_name}.{database_name}.{table_name}")
+
+                
