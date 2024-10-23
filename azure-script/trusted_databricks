@@ -1,0 +1,114 @@
+%sql
+SELECT * FROM nome_do_catalogo_do_databricks.raw.notebook_databricks WHERE partition_time >= (select max(partition_time) from nome_do_catalogo_do_databricks.raw.notebook_databricks) LIMIT 10
+
+# ------------------------------------- CARGA FULL DA TRUSTED (python)-------------------------------------------------------
+
+df_trusted = spark.sql("""
+SELECT * FROM nome_do_catalogo_do_databricks.raw.notebook_databricks WHERE partition_time >= (SELECT max(partition_time) FROM nome_do_catalogo_do_databricks.raw.notebook_databricks)
+                       """)
+
+colunas_cast = [
+    ("coluna_exemplo_1", "timestamp"),
+    ("coluna_exemplo_2", "string"),
+    ("coluna_exemplo_3", "double"),
+    ("coluna_exemplo_4", "int")
+]
+
+for coluna in colunas_cast:
+    df_trusted = df_trusted.withColumn(coluna[0],  df_trusted[coluna[0]].cast(coluna[1]))
+
+catalog_name = "nome_do_catalogo_do_databricks"
+database_name = "nome_database_trusted"
+table_name = "nome_da_tabela"
+      
+df_trusted.write.format("delta").mode("overwrite").partitionBy("partition_time").saveAsTable(f"{catalog_name}.{database_name}.{table_name}")
+
+display(df_trusted)
+
+
+# ------------------------------------- CARGA FULL DA TRUSTED (direto no sql)-------------------------------------------------------
+
+df_trusted = spark.sql("""
+SELECT CAST(coluna_exemplo_1 AS timestamp) AS coluna_exemplo_1,
+    CAST(coluna_exemplo_2 AS string) AS coluna_exemplo_2,
+    CAST(coluna_exemplo_3 AS string) AS coluna_exemplo_3,
+    CAST(coluna_exemplo_4 AS int) AS coluna_exemplo_4,
+    partition_time FROM nome_do_catalogo_do_databricks.raw.notebook_databricks 
+WHERE partition_time >= (select max(partition_time) from nome_do_catalogo_do_databricks.raw.notebook_databricks)                     
+""")
+
+catalog_name = "nome_do_catalogo_do_databricks"
+database_name = "nome_do_database_trusted"
+table_name = "notebook_databricks"
+      
+df_trusted.write.format("delta").mode("overwrite").partitionBy("partition_time").saveAsTable(f"{catalog_name}.{database_name}.{table_name}")
+
+display(df_trusted)
+
+# ------------------------------------- CARGA INCREMENTAL DA TRUSTED -------------------------------------------------------
+
+%sql
+MERGE INTO nome_do_catalogo_do_databricks.trusted.notebook_databricks T USING (
+  WITH TABLE_MERGE AS (
+    SELECT
+      ROW_NUMBER() OVER (
+        -- particionar pela pk da tabela
+        PARTITION BY CSID
+        ORDER BY
+          partition_time DESC
+      ) AS dense_rank,
+      *
+    FROM
+      nome_do_catalogo_do_databricks.raw.notebook_databricks
+    WHERE
+      partition_time >= (
+        select
+          max(partition_time)
+        from
+          nome_do_catalogo_do_databricks.raw.notebook_databricks
+      )
+  ),
+  TABLE_FILTER AS (
+    SELECT
+      -- aqui entraria as colunas da trusted
+      *
+    FROM
+      TABLE_MERGE
+    WHERE
+      dense_rank = 1
+  )
+  SELECT
+    DISTINCT *
+  FROM
+    TABLE_FILTER
+) S ON T.CSID = S.CSID
+WHEN MATCHED THEN
+UPDATE
+SET
+  T.coluna_exemplo_1 = S.coluna_exemplo_1,
+  T.coluna_exemplo_2 = S.coluna_exemplo_2,
+  T.coluna_exemplo_3 = S.coluna_exemplo_3,
+  T.coluna_exemplo_4 = S.coluna_exemplo_4
+
+WHEN NOT MATCHED BY TARGET THEN
+INSERT
+  (
+    coluna_exemplo_1,
+    coluna_exemplo_2,
+    coluna_exemplo_3,
+    coluna_exemplo_4
+
+  )
+VALUES
+  (
+    S.coluna_exemplo_1,
+    S.coluna_exemplo_2,
+    S.coluna_exemplo_3,
+    S.coluna_exemplo_4
+  )
+  WHEN NOT MATCHED BY SOURCE THEN
+  DELETE;
+
+
+%sql
+SELECT COUNT(*) FROM nome_do_catalogo_do_databrick.nome_da_tabela
